@@ -4,6 +4,8 @@ A highly-optimized, strictly-typed, next-generation Roblox framework created by 
 
 Inspired by industry favorites like Knit and ByteNet, Loom is designed to be lightweight, highly scalable, and packed with everything you need to build top-tier games out of the box—without the spaghetti code or memory leaks.
 
+Need help? Contact me here: https://discord.gg/PrJs2Mjs2c
+
 ---
 
 ## Features
