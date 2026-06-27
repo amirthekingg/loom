@@ -4,109 +4,289 @@ A highly-optimized, strictly-typed, next-generation Roblox framework created by 
 
 Inspired by industry favorites like Knit and ByteNet, Loom is designed to be lightweight, highly scalable, and packed with everything you need to build top-tier games out of the box—without the spaghetti code or memory leaks.
 
-Need help? Contact me here: https://discord.gg/PrJs2Mjs2c
+Need help? Join the community: https://discord.gg/PrJs2Mjs2c
 
 ---
 
 ## Features
 
-- **Single-Script Architecture:** No more scripts scattered everywhere. Load your entire game from one place using Services and Controllers.
-- **Built-in Data & Networking:** Automatically handles datastores, client-syncing, nested tables, and session locking to prevent duplication exploits.
-- **Middleware Protection:** Secure your network remotes easily with built-in rate-limiting and validation.
-- **Smooth UI Tools:** Features a built-in view router and mathematical spring physics for clean, bouncy animations and state binding.
-- **Lag-Free Visuals:** Keep your server running fast. Trigger effects on the server and let the client handle the heavy lifting with pooled visual effects.
-- **Zero Memory Leaks:** Includes `Loom.Pool` to reuse instances (fixing lag spikes) and `Loom.Trove`, the ultimate garbage collector.
-- **Easy Components:** Automatically attach your custom OOP logic to 3D parts using CollectionService. Fully compatible with `Workspace.StreamingEnabled`.
+- **Single-Script Architecture:** Load your entire game from one place using singletons: **Services** on the server and **Controllers** on the client.
+- **Built-in Data Engine:** Session-locked profile data with nested tables replication and automatic client-syncing.
+- **Rate-Limited Networking:** Middleware support out of the box for rate limiting and remote argument protection.
+- **Micro-Interactions Suite:** Springs, reactive states, Tooltips, Click Ripples, 3D tilt card parallaxes, and smooth spring-based button scaling.
+- **Transitions & Router:** Stack-based Screen Router (`Push`, `Pop`, `Replace`) to manage UI screen flows.
+- **Parallel Luau Wrappers:** Built-in synchronization wrappers (`Desynchronize` and `Synchronize`) to switch execution phases.
+- **Garbage Collection & Pooling:** High performance memory pooling (`Loom.Pool`) and structured lifecycle cleanup (`Lrove`/`Trove`).
 
 ---
 
-## Quick Start & Code Examples
+## Framework Bootstrap
 
-Loom separates your game logic into **Services** (Server) and **Controllers** (Client). Here is a quick look at what coding in Loom looks like:
-
-### 1\. Simple Setup & Networking
-
-Create a secure service on the server and call it from the client.
-
-**Server (MyService.lua)**
+### 1. Server Bootstrap
+Place this inside a `Script` in `ServerScriptService`:
 
 ```lua
-local MyService = Loom.CreateService({
-    Name = "MyService",
-    Middleware = {
-        -- Protect this action from being spammed (1 time per 5 seconds)
-        DoAction = { Loom.Middleware.RateLimit(1, 5) }
-    }
+local ServerScriptService = game:GetService("ServerScriptService")
+local Loom = require(ServerScriptService.LoomServer.Loom)
+
+-- Initialize Loom's profile data replication
+Loom.Data.Initialize("data", {
+	leaderstats = {},
+	profile = {
+		Coins = 0,
+		Fling = 0,
+	},
+	inventory = {}
 })
 
-function MyService.Client:DoAction(player)
-    return "Success!"
-end
+-- Load modules
+Loom.AddModules(script.Modules)
+
+-- Start Server
+Loom.Start():Then(function()
+	print("Server Started")
+end):Catch(function(err)
+	warn("Server Failed to Start: ", err)
+end)
 ```
 
-**Client (MyController.lua)**
+### 2. Client Bootstrap
+Place this inside a `LocalScript` in `StarterPlayerScripts`:
 
 ```lua
-local MyController = LoomClient.CreateController({ Name = "MyController" })
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LoomClient = require(ReplicatedStorage:WaitForChild("Loom"):WaitForChild("LoomClient"))
+
+-- Load client controllers
+LoomClient.AddModules(script.Controllers)
+
+-- Start Client
+LoomClient.Start():Then(function()
+	print("LoomClient Started")
+end):Catch(function(err)
+	warn("LoomClient Failed to Start:", err)
+end)
+```
+
+---
+
+## Core Usage Examples
+
+### 1. Services & Controllers (Networking)
+
+**Server Service (`MyService.lua`)**
+```lua
+local ServerScriptService = game:GetService("ServerScriptService")
+local Loom = require(ServerScriptService.LoomServer.Loom)
+
+local MyService = Loom.CreateService({
+	Name = "MyService",
+	Dependencies = {}, -- Dependent service names loaded beforehand
+	Inject = {},       -- Injects referenced service modules
+	Middleware = {
+		-- Protect client calls (e.g. rate limit: 1 call per 5 seconds)
+		DoAction = { Loom.Middleware.RateLimit(1, 5) }
+	},
+	Client = {
+		-- Expose a Remote Event signal
+		ActionSignal = Loom.CreateSignal()
+	}
+})
+
+function MyService:LoomInit()
+	-- Executed sequentially based on dependencies
+end
+
+function MyService:LoomStart()
+	-- Executed concurrently after initialization
+end
+
+function MyService.Client:DoAction(player: Player, message: string): string
+	print("Received from client:", message)
+	self.ActionSignal:Fire(player, "Action complete!")
+	return "Success!"
+end
+
+return MyService
+```
+
+**Client Controller (`MyController.lua`)**
+```lua
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LoomClient = require(ReplicatedStorage.Loom.LoomClient)
+
+local MyController = LoomClient.CreateController({
+	Name = "MyController"
+})
+
+function MyController:LoomInit()
+	
+end
 
 function MyController:LoomStart()
-    local MyService = LoomClient.GetService("MyService")
-    MyService:DoAction():Then(function(result)
-        print(result) -- Prints "Success!" safely
-    end)
+	-- Fetch the server-side service proxy
+	local MyService = LoomClient.GetService("MyService")
+
+	-- Connect to server-fired signals
+	MyService.ActionSignal:Connect(function(msg)
+		print(msg) -- Prints "Action complete!"
+	end)
+
+	-- Invoke server methods asynchronously (returns a Promise)
+	MyService:DoAction("Hello Server!"):andThen(function(result)
+		print(result) -- Prints "Success!"
+	end):catch(function(err)
+		warn("Action failed:", err)
+	end)
+end
+
+return MyController
+```
+
+---
+
+### 2. Data System
+
+Loom replicates player data automatically. It is saved securely on the server and synced in real-time to the client.
+
+**Server-Side Data Operations:**
+```lua
+-- Get a player's full profile or nested data
+local coins = Loom.Data.Get(player, "profile.Coins")
+
+-- Set a player's data value
+Loom.Data.Set(player, "profile.Coins", 100)
+
+-- Adjust numeric values
+Loom.Data.Adjust(player, "profile.Coins", 50)
+```
+
+**Client-Side Data Operations:**
+```lua
+-- Retrieve data synchronously (fast client replication cache)
+local currentCoins = LoomClient.Data.Get("Coins")
+
+-- Observe changes dynamically
+local connection = LoomClient.Data.Observe("Coins", function(value)
+	print("Coins updated to:", value)
+end)
+```
+
+---
+
+### 3. UI Engine & Micro-Interactions
+
+Loom includes helper utilities (`LoomClient.UI`) to make interface layouts bouncy, responsive, and animated.
+
+**Spring Physics & Reactive State:**
+```lua
+local LoomUI = LoomClient.UI
+
+-- Create reactive state value
+local healthState = LoomUI.State(100)
+
+-- Create physical spring model (initialValue, speed, damper)
+local scaleSpring = LoomUI.Spring(1, 15, 0.3) -- Damper 0.3 creates a bouncy effect
+
+-- Bind the spring directly to a UI instance property
+scaleSpring:BindTo(myButton, "Scale")
+
+-- Set spring target goals
+scaleSpring:SetGoal(1.2)
+```
+
+**Premium Micro-Interactions:**
+```lua
+-- 1. Bouncy Button Scaling (spring physics on hover/clicks)
+LoomUI.SmoothButton(myButton, {
+	hoverScale = 1.15,
+	clickScale = 0.9,
+	speed = 15,
+	damper = 0.3
+})
+
+-- 2. Click Ripple Effect
+LoomUI.ClickRipple(myButton, Color3.fromRGB(255, 255, 255))
+
+-- 3. Magnetic Hover Attraction (draws button slightly towards cursor)
+LoomUI.MagneticHover(myButton, 0.2)
+
+-- 4. 3D Tilt Card Parallax (rotates frame relative to cursor hover)
+LoomUI.ParallaxHover(myCard, 8) -- Maximum tilt in degrees
+
+-- 5. Hover Tooltips (creates custom mouse-following tooltips)
+LoomUI.CreateTooltip(myButton, "Click to upgrade your stats!")
+```
+
+**Screen Router Navigation:**
+```lua
+local Router = LoomUI.GetRouter()
+
+-- Register Screen Frames
+Router.Register("Inventory", InventoryFrame)
+Router.Register("Shop", ShopFrame)
+
+-- Navigate between Screens (stack-based push/pop)
+Router.Push("Shop") -- Opens Shop, hides previous
+Router.Pop()        -- Navigates back
+```
+
+---
+
+### 4. Memory Utilities
+
+**Memory Pooling (`Loom.Pool`):**
+Reuse instances (like bullets or projectiles) instead of constantly creating/destroying them to avoid GC overhead.
+```lua
+local Pool = Loom.Pool -- (Or LoomClient.Pool on client)
+
+local bulletPool = Pool.new(workspace.BulletTemplate, 50)
+
+-- Retrieve a bullet from pool (spawns/makes visible)
+local bullet = bulletPool:Get()
+
+-- Return bullet back to pool when finished (despawns/hides)
+bulletPool:Return(bullet)
+```
+
+**Lifecycle Cleanup (`Loom.Trove`):**
+Loom re-exports the `Trove` class (requires it directly) for cleanup management.
+```lua
+local Trove = require(game.ReplicatedStorage.Loom.Util.Shared.Trove)
+local trove = Trove.new()
+
+-- Track connections, instances, or events
+trove:Connect(part.Touched, function() print("Touched") end)
+local folder = trove:Construct(Instance.new, "Folder")
+
+-- Clean up everything at once
+trove:Destroy()
+```
+
+---
+
+### 5. Parallel Luau execution
+
+Safely transition code to parallel worker threads and sync back.
+```lua
+function MyService:LoomStart()
+	task.spawn(function()
+		-- 1. Desynchronize to run computation on background thread
+		Loom.Desynchronize()
+		
+		local count = 0
+		for i = 1, 1000000 do
+			count += i
+		end
+		
+		-- 2. Synchronize back to Serial Phase to safely modify the DataModel
+		Loom.Synchronize()
+		print("Calculation complete:", count)
+	end)
 end
 ```
 
-### 2\. Safe Data Saving
-
-Loom handles saving, syncing, and session-locking automatically.
-
-```lua
--- SERVER: Setup data with default values
-Loom.Data.Initialize("GameData", { 
-    leaderstats = { Coins = 0, Level = 1 },
-    inventory = { Swords = 0 }
-})
-
--- Update a value (Loom automatically finds nested keys)
-Loom.Data.Set(player, "Coins", 50) 
-
--- CLIENT: Read the data easily
-local coins = LoomClient.Data.Get("Coins")
-```
-
-### 3\. Smooth UI & Animations
-
-Say goodbye to clunky menu code.
-
-```lua
--- Easily hide/show different UI screens
-LoomClient.UI.Router.Register("Shop", ShopFrame)
-LoomClient.UI.Router.Navigate("Shop")
-
--- Bind a bouncy math spring to a TextLabel
-local scoreState = LoomClient.UI.State(0)
-local scoreSpring = LoomClient.UI.Spring(scoreState:Get(), 15, 0.8)
-
-scoreState.OnChanged:Connect(function(val) scoreSpring:SetGoal(val) end)
-scoreSpring:BindTo(myTextLabel, "Text")
-```
-
-### 4\. Memory Leak Protection
-
-Prevent lag spikes and clean up your connections easily.
-
-```lua
--- Reuse bullets instead of causing lag by creating new ones
-local myPool = Loom.Pool.new(workspace.BulletTemplate, 50)
-local bullet = myPool:Get()
-myPool:Return(bullet) -- Hides it for reuse!
-
--- Prevent memory leaks by throwing events in a Trove
-local myTrove = Loom.Trove.new()
-myTrove:Add(workspace.Part.Touched:Connect(function() end))
-myTrove:Destroy() -- Automatically disconnects everything inside!
-```
+---
 
 ## License
 Loom is completely free and open-source, released under the [MIT License](LICENSE.md).
